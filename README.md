@@ -1,6 +1,8 @@
 # BOB_Network_HW04
 WinDivert를 이용한 domain기반 웹사이트 블랙리스트 구현.
 
+WinDivert 홈페이지의 Webfilter 예제를 기반으로 구성한 후 내부 알고리즘을 수정했다.
+
 ### 사용법
 > webfilter.exe <차단 사이트 목록 파일>
 
