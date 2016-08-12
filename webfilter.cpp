@@ -31,6 +31,7 @@
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <queue>
 
 #include "windivert.h"
 
@@ -39,6 +40,9 @@
 
 #define MAX_URL_LEN 100
 #define MAX_BLACKLIST_LEN 10000
+
+#define MAX_AUTOMATA_STATES 10000
+#define NUM_ALPHABET 42
 
 /*
 * URL and blacklist representation.
@@ -52,6 +56,13 @@ struct URLlist
 {
 	int len;
 	URL list[MAX_BLACKLIST_LEN];
+};
+
+struct AutomataStruct {
+	int numState;
+	int move[MAX_AUTOMATA_STATES][NUM_ALPHABET]; // delta-function
+	int failLink[MAX_AUTOMATA_STATES];
+	bool isMalice[MAX_AUTOMATA_STATES];
 };
 
 /*
@@ -95,8 +106,11 @@ static void PacketInit(PPACKET packet);
 static BOOL BlackListMatch(char *domain);
 static void BlackListRead(const char *filename);
 static BOOL BlackListPayloadMatch(char *data, UINT16 len);
+static void ConstructAutomata();
+static int char2Idx(char ch);
 
 URLlist blacklist; // due to memory size
+AutomataStruct automata;
 
 /*
 * Entry.
@@ -132,8 +146,11 @@ int __cdecl main(int argc, char **argv)
 	// read blacklist
 	BlackListRead(argv[1]);
 	// pre-processing
+	ConstructAutomata();
 
-
+	printf("blasklist length: %d\n", blacklist.len);
+	for (int i = 0; i < blacklist.len; i++)
+		printf("%d : %s\n", i + 1, blacklist.list[i].domain);
 
 	// Initialize the pre-frabricated packets:
 	blockpage_len = sizeof(DATAPACKET) + sizeof(block_data) - 1;
@@ -267,8 +284,18 @@ static void PacketInit(PPACKET packet)
 */
 static BOOL BlackListMatch(char *domain)
 {
-	//return True if a given URL exists in the blacklist
-	return true;
+	int curState = 0;
+	for (int i = 0; domain[i] != 0; i++)
+	{
+		while (curState != 0 && automata.move[curState][char2Idx(domain[i])] == 0)
+			curState = automata.failLink[curState];
+		curState = automata.move[curState][char2Idx(domain[i])];
+	}
+	
+	if (automata.isMalice[curState])
+		return true;
+
+	return false;
 }
 
 /*
@@ -284,14 +311,102 @@ static void BlackListRead(const char *filename)
 			filename);
 		exit(EXIT_FAILURE);
 	}
-
-	// Read URLs from the file and add them to the blacklist: 
-	fscanf(fp, "%d ", &blacklist.len);
+	
+	// Read URLs from the file and add them to the blacklist:
+	fscanf(fp, "%d", &blacklist.len);
 
 	for (int i = 0; i < blacklist.len; i++)
-		fscanf(fp, "%s ", blacklist.list[i].domain);
+		fscanf(fp, "%s", blacklist.list[i].domain);
 
 	fclose(fp);
+}
+
+/*
+* construct automata(Aho-Corasick)
+*/
+static int char2Idx(char ch)
+{
+	// Case 1. English alphabet : 0(a) - 25(z)
+	if (ch >= 'a' && ch <= 'z')
+		return ch - 'a';
+	if (ch >= 'A' && ch <= 'Z')
+		return ch - 'A';
+	// Case 2. digits : 26(0) - 35(9)
+	if (ch >= '0' && ch <= '9')
+		return ch - '0' + 26;
+	// Case 3. special characters
+	switch (ch)
+	{
+	case '-':	return 36;
+	case '/':	return 37;
+	case '.':	return 38;
+	case ':':	return 39;
+	case '=':	return 40;
+	case '?':	return 41;
+	default:	return -1; // should not happen
+	}
+}
+
+static void ConstructAutomata()
+{
+	int curState, linkState;
+	char *URL;
+	std::queue<int> Q;
+
+	// init
+	automata.numState = 1;
+	for (int i = 0; i<NUM_ALPHABET; i++)
+		automata.move[0][i] = 0;
+	automata.isMalice[0] = false;
+
+	// construct Trie
+	for (int idx = 0; idx<blacklist.len; idx++)
+	{
+		curState = 0;
+		URL = blacklist.list[idx].domain;
+		for (int i = 0; URL[i] != 0; i++)
+		{
+			if (automata.move[curState][char2Idx(URL[i])] == 0)
+			{
+				for (int j = 0; j<NUM_ALPHABET; j++)
+					automata.move[automata.numState][j] = 0;
+				automata.isMalice[automata.numState] = false;
+
+				automata.move[curState][char2Idx(URL[i])] = automata.numState;
+				automata.numState++;
+			}
+
+			curState = automata.move[curState][char2Idx(URL[i])];
+		}
+		automata.isMalice[curState] = true;
+	}
+
+	// construct automata.failLink
+	automata.failLink[0] = 0;
+	for (int i = 0; i<NUM_ALPHABET; i++)
+	{
+		if (automata.move[0][i] != 0)
+		{
+			automata.failLink[automata.move[0][i]] = 0;
+			Q.push(automata.move[0][i]);
+		}
+	}
+	while (!Q.empty())
+	{
+		curState = Q.front(); Q.pop();
+		for (int i = 0; i<NUM_ALPHABET; i++)
+		{
+			if (automata.move[curState][i] != 0)
+			{
+				linkState = automata.failLink[curState];
+				while (linkState != 0 && automata.move[linkState][i] == 0)
+					linkState = automata.failLink[linkState];
+				automata.failLink[automata.move[curState][i]] = automata.move[linkState][i];
+
+				Q.push(automata.move[curState][i]);
+			}
+		}
+	}
 }
 
 /*
@@ -341,7 +456,7 @@ static BOOL BlackListPayloadMatch(char *data, UINT16 len)
 
 	domain[j] = '\0';
 
-	printf("URL %s/%s: ", domain, uri);
+	printf("Domain(%s), URI(%s): ", domain, uri);
 
 	// Search the blacklist:
 	result = BlackListMatch(domain);
