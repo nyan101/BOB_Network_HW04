@@ -51,7 +51,6 @@
 struct URLnode {
 	long long hashVal;
 	long long hashVal2;
-	//char* URL; // if there is no collision, it's not necessary
 
 	const bool operator<(const URLnode &rhs) const
 	{
@@ -285,7 +284,7 @@ static BOOL BlackListMatch(char *domain)
 	hashInput = hashInput + strURL;
 	tNode.hashVal = (tNode.hashVal << 32) | std::hash<std::string>()(hashInput);
 	
-	hashInput = strURL + "I'm not sure if it's good to avoid collision";;
+	hashInput = strURL + "I'm not sure if this is a good way to avoid collision";
 	tNode.hashVal2 = std::hash<std::string>()(hashInput);
 	hashInput = hashInput + strURL;
 	tNode.hashVal2 = (tNode.hashVal2 << 32) | std::hash<std::string>()(hashInput);
