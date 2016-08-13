@@ -329,7 +329,7 @@ static void BlackListRead(const char *filename)
 		tNode.hashVal = (tNode.hashVal << 32) | std::hash<std::string>()(hashInput);
 
 		
-		hashInput = strURL + "I'm not sure if it's good to avoid collision";;
+		hashInput = strURL + "I'm not sure if this is a good way to avoid collision";;
 		tNode.hashVal2 = std::hash<std::string>()(hashInput);
 		hashInput = hashInput + strURL;
 		tNode.hashVal2 = (tNode.hashVal2 << 32) | std::hash<std::string>()(hashInput);
